@@ -1,0 +1,334 @@
+---
+title: "Aarhus Byraads forhandlingsprotokoller 1930-1940 term frequency(tf) - inverse document frequency(idf)"
+output:
+  html_document:
+    df_print: paged
+---
+
+Dette dokument er den kodebaserede dokumentation for databehandlingen af data fra Aarhus Stadsarkivs github: https://github.com/aarhusstadsarkiv/datasets/tree/master/minutes/city-council. I dette tilfælde er der taget udgangspunkt i datasættet der omhandler årene fra 1930 til 1940. 
+
+Datasættet er struktureret som følger: 
+
+>"*DESCRIPTION
+The datasets consist of the transcribed and proof-read text from the annually printed minutes. Text from one specific agenda item on one specific page produces one row. If the same agenda item runs across several pages, it just produces several rows of text.*
+>
+>*Each row has the following columns:*
+>
+>***date_of_meeting***
+>*The date of the meeting (yyyy-mm-dd)*
+>
+>***publication_page***
+>*The original pagenumber from the printed minutes*
+>
+>***page_url***
+>*Link to a scanned copy of the printed page*
+>
+>***record_ids***
+>*One or more record_ids that the current agenda item references. The ids are assigned by the City Council*
+>
+>***text***
+>*The transcribed text*"
+
+(Indsat fra https://github.com/aarhusstadsarkiv/datasets/tree/master/minutes/city-council)
+
+
+
+
+
+
+
+
+
+
+Datasættet er behandlet i statistik-programmet R, der giver mange muligheder for statistisk arbejde og efterfølgende grafisk fremstilling af resultaterne. I R arbejder man med pakker, som tilføjer forskellige funktionaliteter til grundstammen af R-funktioner. I dette tilfælde er de relevante pakker:  
+
+```{r, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(tidytext)
+library(lubridate)
+library(ggplot2)
+```
+Dokumentation for de enkelte pakker: <br>
+*https://www.tidyverse.org/packages/ <br>
+*https://cran.r-project.org/web/packages/tidytext/vignettes/tidytext.html <br>
+*https://lubridate.tidyverse.org/ <br>
+*https://ggplot2.tidyverse.org/ <br>
+
+For mere information om R generelt: 
+https://www.r-project.org/
+
+
+
+
+
+<br>
+Først indlæses datasættet i R. Dette gøre med et link til datasættet på Aarhus Stadsarkivs github:
+
+```{r, warning=FALSE, message=FALSE}
+meetings_1930_1940 <- read_csv("https://raw.githubusercontent.com/aarhusstadsarkiv/datasets/master/minutes/city-council/city-council-minutes-1930-1940.csv")
+```
+<br>
+
+
+
+
+
+
+
+
+
+
+
+
+
+Data behandlingen i denne sammenhæng tager udgangspunkt i tidytext-pakken. Tankegangen er her at tage en tekst og splitte den op i enkelte ord. På denne måde optræder der kun ét ord per række i datasættet. Dette er dog et problem i forhold til propier på formen "M. O. Pedersen". Ved brug af tidytext princippet vil dette proprium blive til "M", "O", og "Pedersen" på hver sin række. Alt tegnsætning luges fra af tidytext-formattet, hvorfor det kun er "M" og "O", der fremgår. Herved opstår der altså et meningstab i og med at "M" og "O" for sig selv ikke gør os klogere. Dette meningstab er vi interesseret i at undgå og dette gøres ved hjælp af regulære udtryk som: 
+
+>"([A-Z])\\. ([A-Z])\\. ([A-z-]+)", "\\1_\\2_\\3"
+
+Dette får R til at lede efter alle tilfælde hvor et stort bogstav efterfølges af et punktum, et mellemrum, et stort bogstav, et punktum, et mellemrum og et stort bogstav efterfulgt af et vilkårligt antal af små bogstaver. Herefter erstattes punktummerne og mellemrummene med tegnet "_", således at:
+
+"M. O. Pedersen" ændres til "M_O_Pedersen"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ved et kig på mødereferaterne kan man se, at propriet "Christian" forkortes "Chr." efterfulgt af et efternavn. Det og lignende tilfælde er også søgt løst med regulære udtryk: 
+
+```{r}
+meetings_1930_1940 %>% 
+  mutate(text = str_replace_all(text, pattern = "([A-Z])\\. ([A-Z])\\. ([A-z-]+)", "\\1_\\2_\\3")) %>%
+  mutate(text = str_replace_all(text, pattern = "([A-Z])\\. ([A-Z])\\. ([A-Z])\\. ([A-z-]+)", "\\1_\\2_\\3_\\4")) %>% 
+  mutate(text = str_replace_all(text, pattern = "([A-Z])\\. ([A-Z][a-z]+)", "\\1_\\2")) %>% 
+  mutate(text = str_replace_all(text, pattern = "Chr\\. ([A-z-]+)", "Chr_\\1" )) %>% 
+  mutate(text = str_replace_all(text, pattern = "Vald\\. ([A-z]+)", "Vald_\\1")) -> meetings_1930_1940
+```
+Dette kan muligvis vise sig at være utilstrækkeligt, da andre navne kan forkortes på lignende måder lige så vel som der kan være flere mellemnavne end de 3, der bliver kodet efter her. 
+<br>
+
+
+
+
+
+
+
+I denne undersøgelse er ønsket at finde de vigtigste ord pr. år i Aarhus Byråds forhandlingsprotokoller. Problemet er imidlertidig, at tidsformatet i Stadsarkivets data er en dato på formen ÅÅÅÅ-MM-DD. Da vi her kun er interesseret i året, kan vi takket være pakken lubridate med funktionen 'year' udtrække året og sætte den over i sin egen kolonne: 
+
+```{r}
+meetings_1930_1940 %>% 
+  mutate(aar = year(date_of_meeting)) %>% 
+  select(aar, text, record_ids)
+```
+
+
+
+
+
+
+
+
+
+Det næste der sker er, at vi omdanner data om til det førnævnte tidytextformat, hvor hvert ord kommer til at stå på en række for sig selv: 
+```{r}
+meetings_1930_1940 %>% 
+  mutate(aar = year(date_of_meeting)) %>% 
+  select(aar, text, record_ids) %>% 
+  unnest_tokens(word, text)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+Herefter er vi interesserede i at finde ud af de ord, der hyppigst forekommer pr. år i årene 1930-1940, som vores datasæt spænder over. 
+```{r}
+meetings_1930_1940 %>% 
+  mutate(aar = year(date_of_meeting)) %>% 
+  select(aar, text, record_ids) %>% 
+  unnest_tokens(word, text) %>% 
+  count(aar, word, sort = TRUE)
+```
+Ikke overraskende er det ordet "at", som optræder flest gange pr. år. Dette er ikke videre interessant, så vi er nu interesseret i at finde et mål, der gør at vi kan sammenligne ordenes hyppighed på tværs af årene. Dette kan vi gøre ved at udregne ordets, termets, frekvens: 
+
+$$frekvens=\frac{n_{term}}{N_{aar}}$$
+
+Før vi kan tage dette skridt skal vi dog have R til at tælle, hvor mange ord, der er i de enkelte år:
+
+
+```{r}
+meetings_1930_1940 %>% 
+  mutate(aar = year(date_of_meeting)) %>% 
+  select(aar, text, record_ids) %>% 
+  unnest_tokens(word, text) %>% 
+  count(aar, word, sort = TRUE) %>% 
+  
+  group_by(aar) %>% 
+  summarise(total = sum(n)) -> total_words
+
+
+total_words
+```
+
+
+
+
+
+
+
+Herefter skal vi have tilføjet de totale antal ord til vores dataframe:
+
+
+
+
+
+```{r}
+meetings_1930_1940 %>% 
+  mutate(aar = year(date_of_meeting)) %>% 
+  select(aar, text, record_ids) %>% 
+  unnest_tokens(word, text) %>% 
+  count(aar, word, sort = TRUE) %>% 
+  
+  left_join(total_words, by = "aar") -> meetings_1930_1940
+```
+
+
+```{r}
+meetings_1930_1940
+```
+
+Nu har vi de tal vi skal bruge for at udregne ordenes frekvenser. Her udregner vi for "at" i 1935.  
+
+
+
+
+
+
+
+$${frekvens for "at" i 1935}=\frac{4979}{140307}=0.0354864690$$
+
+
+
+
+
+
+Ved at udregne frekvensen for termer kan vi sammenligne dem på tværs af år. Det er dog ikke videre interessant at sammenligne brugen af ordet "at" årene i mellem. Vi mangler derfor en måde at "straffe" ord som optræder hyppigt i alle årene. Til dette kan vi bruge inversed document frequency(idf):
+$$\textrm{idf}(term)=\ln(\frac{n}{N})$$ 
+Hvor n er det totale antal dokumenter(i vores tilfælde år) og N er antallet af år, hvor ordet fremgår.
+
+
+
+
+
+
+$$\textrm{idf}(at)=\ln(\frac{10}{10})=0$$
+Herved får vi altså straffet ord som optræder med stor hyppighed i alle årene eller mange af årene. Ord der forekommer i alle årene kan altså altså ikke fortælle os noget særlig om et givent år. Disse ord vil have en idf på 0 hvorfor deres tf_idf også bliver 0, da denne er defineret ved tf gange med idf. 
+
+
+
+
+
+
+
+
+Heldigvis kan R udregne tf, idf og tf_idf for alle ordene for os i et snuptag:
+```{r}
+meetings_1930_1940 <- meetings_1930_1940 %>% 
+  bind_tf_idf(word, aar, n)
+meetings_1930_1940
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Ikke desto mindre ser vi ikke nogen interessant ord. Dette skyldes at R lister ordene op i et stigende hierarki - altså lavest til højst.
+Vi beder det om at gøre det faldende i stedet - højest tf_idf
+```{r}
+meetings_1930_1940 %>% 
+  select(-total) %>% 
+  arrange(desc(tf_idf))
+```
+
+
+
+
+
+
+
+
+Vi ser her at 1938, 1936 og 1939 kommer ret højt på listen. Dette skyldes formentlig at journalnumrene dannes udfra det pågældende år. Inden vi laver en grafisk visualisering, fjerne vi dog lige alle årstal i teksten. 
+
+
+
+
+
+
+
+```{r}
+stopord <- data_frame(word = c("1930", "1931", "1932", "1933", "1934", "1935", 
+                                   "1936", "1937", "1938", "1939", "1940"))
+meetings_1930_1940 <- anti_join(meetings_1930_1940, stopord, by = "word")
+```
+
+
+
+
+Herefter kan vi gå over til en grafisk visualisering. 
+
+
+
+```{r}
+meetings_1930_1940 %>%
+  arrange(desc(tf_idf)) %>%
+  mutate(word = factor(word, levels = rev(unique(word)))) %>% 
+  group_by(aar) %>% 
+  top_n(15) %>% 
+  ungroup %>%
+  ggplot(aes(word, tf_idf)) +
+  geom_col(show.legend = FALSE, fill = "skyblue2") +
+  labs(x = NULL, y = "tf-idf") +
+  facet_wrap(~aar, ncol = 3, scales = "free") +
+  scale_y_continuous(labels = scales::comma_format(accuracy = 0.0001)) +
+  coord_flip()
+```
+
+
+```{r}
+ggsave(
+  "~/Desktop/tf_idf_aarhus_byraad_1930-1940.png",
+  width = 45,
+  height = 30,
+  units = "cm",
+  bg = "transparent")
+```
+
+
